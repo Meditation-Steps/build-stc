@@ -1,0 +1,61 @@
+{
+  "donorbox_campaign": "Let's build the New Training Center!",
+  "floors": [
+    {
+      "id": 1,
+      "name": "Foundation Level & Kitchen",
+      "caption": "Phase 1: Foundation Level — Lower Ground Floor & Kitchen",
+      "rooms": [
+        { "id": "lobby",     "name": "Hallway",       "price": 10859.34,  "order": 1 },
+        { "id": "staircase", "name": "Staircase",     "price": 6322.12,  "order": 2 },
+        { "id": "kitchen",   "name": "Kitchen",       "price": 15084.87, "order": 3 },
+        { "id": "dining",    "name": "Dining Room",   "price": 20174.91, "order": 4 },
+        { "id": "toilets",   "name": "Guest WC and WC", "price": 5557.58, "order": 5 },
+        { "id": "store",     "name": "Storage Room",  "price": 8711.29,  "order": 6 },
+        { "id": "laundry",   "name": "Laundry Room",  "price": 3528.62,  "order": 7 },
+        { "id": "utility",   "name": "Utility Room",  "price": 3333.88,  "order": 8 }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Dharmacakra Hall",
+      "caption": "Phase 2: Dharmacakra Hall — Ground Floor",
+      "rooms": [
+        { "id": "entrance",          "name": "Entrance Foyer",     "price": 4190.24,  "order": 1 },
+        { "id": "lobby",             "name": "Lobby",              "price": 8748.05,  "order": 2 },
+        { "id": "hallways",          "name": "Hallways",           "price": 8380.48,  "order": 3 },
+        { "id": "staircase",         "name": "Staircase",          "price": 4116.73,  "order": 4 },
+        { "id": "hall",              "name": "Meditation Hall",    "price": 12438.40, "order": 5 },
+        { "id": "bedroom1",          "name": "Shared Bedroom 1",   "price": 7507.15,  "order": 6 },
+        { "id": "bedroom2",          "name": "Shared Bedroom 2",   "price": 6998.44,  "order": 7 },
+        { "id": "bathroom",          "name": "Shower, WC and Guest WC", "price": 14408.55, "order": 8 },
+        { "id": "guest_bedroom",     "name": "Guest/Clinic Room",  "price": 2940.52,  "order": 9 },
+        { "id": "guest_bathroom",    "name": "Guest Bathroom",     "price": 2197.30,  "order": 10 },
+        { "id": "trainers_bedroom",  "name": "Trainer's Bedroom",  "price": 3155.18,  "order": 11 },
+        { "id": "trainers_kitchen",  "name": "Trainer's Kitchen",  "price": 5134.15,  "order": 12 },
+        { "id": "trainers_bathroom", "name": "Trainer's Bathroom", "price": 2197.30,  "order": 13 },
+        { "id": "veranda",           "name": "Balcony/Verandas",   "price": 14776.11, "order": 14 },
+        { "id": "store",             "name": "Storage Room",       "price": 699.84,   "order": 15 }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Trainee Living Quarters",
+      "caption": "Phase 3: Trainee Living Quarters",
+      "rooms": [
+        { "id": "hallway",     "name": "Hallway",         "price": 7204.27,  "order": 1 },
+        { "id": "lounge",      "name": "Dining Lounge",   "price": 14552.63, "order": 2 },
+        { "id": "library",     "name": "Library",         "price": 17202.04, "order": 3 },
+        { "id": "bedroom1",    "name": "Shared Bedroom 1", "price": 7704.16,  "order": 4 },
+        { "id": "bedroom2",    "name": "Shared Bedroom 2", "price": 6998.44,  "order": 5 },
+        { "id": "bedroom3",    "name": "Shared Bedroom 3", "price": 6998.44,  "order": 6 },
+        { "id": "bathroom",    "name": "Shower, WC and Guest WC", "price": 14408.55,  "order": 7 },
+        { "id": "trainer1",    "name": "Guest Trainer's Room 1", "price": 3155.18, "order": 8 },
+        { "id": "trainer2",    "name": "Guest Trainer's Room 2", "price": 3416.88, "order": 9 },
+        { "id": "trainers_wc", "name": "Guest/Trainers T&B", "price": 2197.30,  "order": 10 },
+        { "id": "veranda",     "name": "Balcony/Verandas",  "price": 15415.68,  "order": 11 },
+        { "id": "store",       "name": "Storage Room",    "price": 1699.62,  "order": 12 }
+      ]
+    }
+  ]
+}
