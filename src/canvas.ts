@@ -1,11 +1,39 @@
 import type { FloorState } from './types';
 import { floorImagePath, maskPath } from './state';
 
-const imageCache = new Map<string, HTMLImageElement>();
-const alphaMaskCache = new Map<string, OffscreenCanvas>();
+// ─── Visual parameters — edit freely ─────────────────────────────────────────
+const UNFUNDED_COLOR  = { r: 120, g:  70, b:  40 } as const; // brown
+const FUNDED_COLOR    = { r:  55, g: 150, b:  55 } as const; // green
+const OVERLAY_ALPHA   = 0.55;         // 0–1, opacity of the colour tint
+
+const LABEL_FONT_SIZE = 18;           // px at native canvas resolution
+const LABEL_FONT      = `bold ${LABEL_FONT_SIZE}px sans-serif`;
+const LABEL_COLOR     = 'white';
+const LABEL_BG        = 'rgba(0,0,0,0.42)'; // text-box fill
+const LABEL_PADDING   = 5;           // px inside text box
+const LABEL_RADIUS    = 4;           // px corner radius of text box
+
+const FUNDED_LABEL    = '✅';         // shown on fully funded rooms
+const UNFUNDED_LABEL  = '🚧';        // shown on not-yet-funded rooms
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RgbColor {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+}
+
+interface MaskData {
+  readonly alphaMask: OffscreenCanvas;
+  readonly centroid: { readonly x: number; readonly y: number };
+}
+
+const imageCache    = new Map<string, HTMLImageElement>();
+const maskDataCache = new Map<string, MaskData>();
 
 function loadImage(src: string): Promise<HTMLImageElement> {
-  if (imageCache.has(src)) return Promise.resolve(imageCache.get(src)!);
+  const cached = imageCache.get(src);
+  if (cached) return Promise.resolve(cached);
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => { imageCache.set(src, img); resolve(img); };
@@ -14,72 +42,139 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function buildAlphaMask(maskImg: HTMLImageElement, w: number, h: number, key: string): OffscreenCanvas {
-  const cached = alphaMaskCache.get(key);
+// Converts white-on-black mask → alpha mask and computes room centroid in one pass.
+function buildMaskData(maskImg: HTMLImageElement, w: number, h: number, key: string): MaskData {
+  const cached = maskDataCache.get(key);
   if (cached) return cached;
 
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
   ctx.drawImage(maskImg, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h);
-  for (let i = 0; i < data.data.length; i += 4) {
-    data.data[i + 3] = data.data[i]; // red channel → alpha
-    data.data[i] = data.data[i + 1] = data.data[i + 2] = 0;
+  const imageData = ctx.getImageData(0, 0, w, h);
+
+  let sumX = 0, sumY = 0, count = 0;
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    const lum = imageData.data[i]; // white-on-black → red channel is luminance
+    imageData.data[i + 3] = lum;
+    imageData.data[i] = imageData.data[i + 1] = imageData.data[i + 2] = 0;
+    if (lum > 128) {
+      const px = i >> 2;
+      sumX += px % w;
+      sumY += Math.floor(px / w);
+      count++;
+    }
   }
-  ctx.putImageData(data, 0, 0);
-  alphaMaskCache.set(key, canvas);
-  return canvas;
+  ctx.putImageData(imageData, 0, 0);
+
+  const centroid = count > 0
+    ? { x: sumX / count, y: sumY / count }
+    : { x: w / 2, y: h / 2 };
+
+  const result: MaskData = { alphaMask: canvas, centroid };
+  maskDataCache.set(key, result);
+  return result;
 }
 
-const MAX_BLOCK_SIZE = 16;
+function lerpColor(a: RgbColor, b: RgbColor, t: number): RgbColor {
+  return {
+    r: Math.round(a.r + (b.r - a.r) * t),
+    g: Math.round(a.g + (b.g - a.g) * t),
+    b: Math.round(a.b + (b.b - a.b) * t),
+  };
+}
 
-function applyPixelation(
+function applyOverlay(
   ctx: CanvasRenderingContext2D,
-  floorImg: HTMLImageElement,
   alphaMask: OffscreenCanvas,
-  progress: number,
+  color: RgbColor,
+  w: number,
+  h: number,
 ): void {
-  const blockSize = Math.max(1, Math.round(MAX_BLOCK_SIZE * (1 - progress)));
-  const w = floorImg.naturalWidth;
-  const h = floorImg.naturalHeight;
+  const overlay = new OffscreenCanvas(w, h);
+  const overlayCtx = overlay.getContext('2d') as OffscreenCanvasRenderingContext2D;
+  overlayCtx.fillStyle = `rgb(${color.r},${color.g},${color.b})`;
+  overlayCtx.fillRect(0, 0, w, h);
+  overlayCtx.globalCompositeOperation = 'destination-in';
+  overlayCtx.drawImage(alphaMask, 0, 0);
 
-  const small = new OffscreenCanvas(Math.max(1, Math.ceil(w / blockSize)), Math.max(1, Math.ceil(h / blockSize)));
-  (small.getContext('2d') as OffscreenCanvasRenderingContext2D).drawImage(floorImg, 0, 0, small.width, small.height);
+  ctx.globalAlpha = OVERLAY_ALPHA;
+  ctx.drawImage(overlay, 0, 0);
+  ctx.globalAlpha = 1;
+}
 
-  const pixelated = new OffscreenCanvas(w, h);
-  const pixCtx = pixelated.getContext('2d') as OffscreenCanvasRenderingContext2D;
-  pixCtx.imageSmoothingEnabled = false;
-  pixCtx.drawImage(small, 0, 0, w, h);
-  pixCtx.globalCompositeOperation = 'destination-in';
-  pixCtx.drawImage(alphaMask, 0, 0);
+function formatEuros(amount: number): string {
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
 
-  ctx.drawImage(pixelated, 0, 0);
+function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string): void {
+  ctx.save();
+  ctx.font = LABEL_FONT;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const tw = ctx.measureText(text).width;
+  const th = LABEL_FONT_SIZE;
+  const boxX = cx - tw / 2 - LABEL_PADDING;
+  const boxY = cy - th / 2 - LABEL_PADDING;
+  const boxW = tw + LABEL_PADDING * 2;
+  const boxH = th + LABEL_PADDING * 2;
+
+  ctx.fillStyle = LABEL_BG;
+  ctx.beginPath();
+  ctx.roundRect(boxX, boxY, boxW, boxH, LABEL_RADIUS);
+  ctx.fill();
+
+  ctx.fillStyle = LABEL_COLOR;
+  ctx.fillText(text, cx, cy);
+  ctx.restore();
 }
 
 export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState): Promise<void> {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  const roomsToRender = floor.rooms.filter(r => r.status.kind !== 'funded');
-
   const [floorImg, ...maskResults] = await Promise.all([
     loadImage(floorImagePath(floor.id)),
-    ...roomsToRender.map(room =>
+    ...floor.rooms.map(room =>
       loadImage(maskPath(floor.id, room.id)).catch(() => null)
     ),
   ]);
 
-  canvas.width = floorImg.naturalWidth;
-  canvas.height = floorImg.naturalHeight;
+  const w = floorImg.naturalWidth;
+  const h = floorImg.naturalHeight;
+  canvas.width = w;
+  canvas.height = h;
   ctx.drawImage(floorImg, 0, 0);
 
-  for (let i = 0; i < roomsToRender.length; i++) {
+  for (let i = 0; i < floor.rooms.length; i++) {
     const maskImg = maskResults[i];
     if (!maskImg) continue;
-    const room = roomsToRender[i];
-    const progress = room.status.kind === 'active' ? room.status.progress : 0;
+
+    const room = floor.rooms[i];
     const key = maskPath(floor.id, room.id);
-    const alphaMask = buildAlphaMask(maskImg, floorImg.naturalWidth, floorImg.naturalHeight, key);
-    applyPixelation(ctx, floorImg, alphaMask, progress);
+    const { alphaMask, centroid } = buildMaskData(maskImg, w, h, key);
+
+    const [color, label] = ((): [RgbColor, string] => {
+      switch (room.status.kind) {
+        case 'funded':
+          return [FUNDED_COLOR, FUNDED_LABEL];
+        case 'active': {
+          const raised = room.price * room.status.progress;
+          return [
+            lerpColor(UNFUNDED_COLOR, FUNDED_COLOR, room.status.progress),
+            `${formatEuros(raised)} / ${formatEuros(room.price)}`,
+          ];
+        }
+        case 'unfunded':
+          return [UNFUNDED_COLOR, UNFUNDED_LABEL];
+      }
+    })();
+
+    applyOverlay(ctx, alphaMask, color, w, h);
+    drawLabel(ctx, centroid.x, centroid.y, label);
   }
 }
