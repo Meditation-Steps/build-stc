@@ -6,7 +6,7 @@ const UNFUNDED_COLOR  = { r: 120, g:  70, b:  40 } as const; // brown
 const FUNDED_COLOR    = { r:  55, g: 150, b:  55 } as const; // green
 const OVERLAY_ALPHA   = 0.55;         // 0–1, opacity of the colour tint
 
-const LABEL_FONT_SIZE = 18;           // px at native canvas resolution
+const LABEL_FONT_SIZE = 33;           // px at native canvas resolution
 const LABEL_FONT      = `bold ${LABEL_FONT_SIZE}px sans-serif`;
 const LABEL_COLOR     = 'white';
 const LABEL_BG        = 'rgba(0,0,0,0.42)'; // text-box fill
@@ -25,7 +25,7 @@ interface RgbColor {
 
 interface MaskData {
   readonly alphaMask: OffscreenCanvas;
-  readonly centroid: { readonly x: number; readonly y: number };
+  readonly anchor: { readonly x: number; readonly y: number };
 }
 
 const imageCache    = new Map<string, HTMLImageElement>();
@@ -42,7 +42,13 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-// Converts white-on-black mask → alpha mask and computes room centroid in one pass.
+// Fraction of the bounding box sampled near each corner when choosing the label anchor.
+const CORNER_SAMPLE_FRACTION = 0.35;
+
+// Converts white-on-black mask → alpha mask, computes bounding box, then picks the
+// bounding-box corner with the most in-room pixels as the label anchor.
+// After putImageData the data array has alpha = original luminance, RGB = 0,
+// so the second pass reads data[i+3] without a second getImageData call.
 function buildMaskData(maskImg: HTMLImageElement, w: number, h: number, key: string): MaskData {
   const cached = maskDataCache.get(key);
   if (cached) return cached;
@@ -51,26 +57,58 @@ function buildMaskData(maskImg: HTMLImageElement, w: number, h: number, key: str
   const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
   ctx.drawImage(maskImg, 0, 0, w, h);
   const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
 
-  let sumX = 0, sumY = 0, count = 0;
-  for (let i = 0; i < imageData.data.length; i += 4) {
-    const lum = imageData.data[i]; // white-on-black → red channel is luminance
-    imageData.data[i + 3] = lum;
-    imageData.data[i] = imageData.data[i + 1] = imageData.data[i + 2] = 0;
+  // Pass 1: build alpha mask + bounding box
+  let minX = w, maxX = 0, minY = h, maxY = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = data[i];
+    data[i + 3] = lum;
+    data[i] = data[i + 1] = data[i + 2] = 0;
     if (lum > 128) {
       const px = i >> 2;
-      sumX += px % w;
-      sumY += Math.floor(px / w);
-      count++;
+      const x = px % w, y = Math.floor(px / w);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
   ctx.putImageData(imageData, 0, 0);
 
-  const centroid = count > 0
-    ? { x: sumX / count, y: sumY / count }
-    : { x: w / 2, y: h / 2 };
+  // Pass 2: pick the fullest bounding-box corner as label anchor.
+  // data[i+3] still holds the original luminance after putImageData.
+  let anchor: { x: number; y: number };
+  if (minX > maxX || minY > maxY) {
+    anchor = { x: w / 2, y: h / 2 };
+  } else {
+    const rw = Math.max(1, Math.round((maxX - minX) * CORNER_SAMPLE_FRACTION));
+    const rh = Math.max(1, Math.round((maxY - minY) * CORNER_SAMPLE_FRACTION));
+    const corners = [
+      [minX,      minY,      minX + rw, minY + rh],
+      [maxX - rw, minY,      maxX,      minY + rh],
+      [minX,      maxY - rh, minX + rw, maxY     ],
+      [maxX - rw, maxY - rh, maxX,      maxY     ],
+    ] as const;
 
-  const result: MaskData = { alphaMask: canvas, centroid };
+    let bestCount = -1, bestX = (minX + maxX) / 2, bestY = (minY + maxY) / 2;
+    for (const [cx0, cy0, cx1, cy1] of corners) {
+      let count = 0, sumX = 0, sumY = 0;
+      for (let y = cy0; y <= cy1; y++) {
+        for (let x = cx0; x <= cx1; x++) {
+          if (data[(y * w + x) * 4 + 3] > 128) { count++; sumX += x; sumY += y; }
+        }
+      }
+      if (count > bestCount) {
+        bestCount = count;
+        bestX = count > 0 ? sumX / count : (cx0 + cx1) / 2;
+        bestY = count > 0 ? sumY / count : (cy0 + cy1) / 2;
+      }
+    }
+    anchor = { x: bestX, y: bestY };
+  }
+
+  const result: MaskData = { alphaMask: canvas, anchor };
   maskDataCache.set(key, result);
   return result;
 }
@@ -113,12 +151,12 @@ function formatEuros(amount: number): string {
 function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string): void {
   ctx.save();
   ctx.font = LABEL_FONT;
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
 
   const tw = ctx.measureText(text).width;
   const th = LABEL_FONT_SIZE;
-  const boxX = cx - tw / 2 - LABEL_PADDING;
+  const boxX = cx;
   const boxY = cy - th / 2 - LABEL_PADDING;
   const boxW = tw + LABEL_PADDING * 2;
   const boxH = th + LABEL_PADDING * 2;
@@ -129,7 +167,7 @@ function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: 
   ctx.fill();
 
   ctx.fillStyle = LABEL_COLOR;
-  ctx.fillText(text, cx, cy);
+  ctx.fillText(text, cx + LABEL_PADDING, cy);
   ctx.restore();
 }
 
@@ -156,7 +194,7 @@ export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState):
 
     const room = floor.rooms[i];
     const key = maskPath(floor.id, room.id);
-    const { alphaMask, centroid } = buildMaskData(maskImg, w, h, key);
+    const { alphaMask, anchor } = buildMaskData(maskImg, w, h, key);
 
     const [color, label] = ((): [RgbColor, string] => {
       switch (room.status.kind) {
@@ -175,6 +213,6 @@ export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState):
     })();
 
     applyOverlay(ctx, alphaMask, color, w, h);
-    drawLabel(ctx, centroid.x, centroid.y, label);
+    drawLabel(ctx, anchor.x, anchor.y, label);
   }
 }
