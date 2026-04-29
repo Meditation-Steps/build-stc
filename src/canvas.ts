@@ -140,14 +140,6 @@ function applyOverlay(
   ctx.globalAlpha = 1;
 }
 
-function formatEuros(amount: number): string {
-  return new Intl.NumberFormat('de-DE', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
-
 function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string): void {
   ctx.save();
   ctx.font = LABEL_FONT;
@@ -171,9 +163,12 @@ function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: 
   ctx.restore();
 }
 
-export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState): Promise<void> {
+export async function renderFloor(
+  canvas: HTMLCanvasElement,
+  floor: FloorState,
+): Promise<{ x: number; y: number } | null> {
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return null;
 
   const [floorImg, ...maskResults] = await Promise.all([
     loadImage(floorImagePath(floor.id)),
@@ -188,6 +183,8 @@ export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState):
   canvas.height = h;
   ctx.drawImage(floorImg, 0, 0);
 
+  let activeAnchor: { x: number; y: number } | null = null;
+
   for (let i = 0; i < floor.rooms.length; i++) {
     const maskImg = maskResults[i];
     if (!maskImg) continue;
@@ -196,23 +193,21 @@ export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState):
     const key = maskPath(floor.id, room.id);
     const { alphaMask, anchor } = buildMaskData(maskImg, w, h, key);
 
-    const [color, label] = ((): [RgbColor, string] => {
+    const [color, label] = ((): [RgbColor, string | null] => {
       switch (room.status.kind) {
         case 'funded':
           return [FUNDED_COLOR, FUNDED_LABEL];
-        case 'active': {
-          const raised = room.price * room.status.progress;
-          return [
-            lerpColor(UNFUNDED_COLOR, FUNDED_COLOR, room.status.progress),
-            `${formatEuros(raised)} / ${formatEuros(room.price)}`,
-          ];
-        }
+        case 'active':
+          activeAnchor = { x: anchor.x, y: anchor.y };
+          return [lerpColor(UNFUNDED_COLOR, FUNDED_COLOR, room.status.progress), null];
         case 'unfunded':
           return [UNFUNDED_COLOR, UNFUNDED_LABEL];
       }
     })();
 
     applyOverlay(ctx, alphaMask, color, w, h);
-    drawLabel(ctx, anchor.x, anchor.y, label);
+    if (label !== null) drawLabel(ctx, anchor.x, anchor.y, label);
   }
+
+  return activeAnchor;
 }

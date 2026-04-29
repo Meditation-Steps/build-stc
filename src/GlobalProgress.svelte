@@ -14,7 +14,6 @@
 </script>
 
 <div class="global-progress">
-  <p class="caption">{caption}</p>
   <div class="bar-row">
     <div class="bar-track">
       <div class="bar-fill" style="width: {progress * 100}%"></div>
