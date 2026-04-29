@@ -13,7 +13,7 @@
         { "id": "toilets",   "name": "Guest WC and WC", "price": 5557.58, "order": 5 },
         { "id": "store",     "name": "Storage Room",  "price": 8711.29,  "order": 6 },
         { "id": "laundry",   "name": "Laundry Room",  "price": 3528.62,  "order": 7 },
-        { "id": "utility",   "name": "Utility Room",  "price": 3333.88,  "order": 8 }
+        { "id": "utility",   "name": "Utility Room",  "price": 2830.25,  "order": 8 }
       ]
     },
     {

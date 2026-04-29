@@ -38,23 +38,30 @@
   // Scrapes the public Donorbox campaign page via a CORS proxy.
   // The raised total is in <p id="total-raised"> formatted as "€1,234,567".
   // If this ever breaks, inspect the campaign page source and update the selector/parser below.
-  async function fetchRaisedAmount(): Promise<number> {
-    const campaignUrl = `https://donorbox.org/${DONORBOX_CAMPAIGN_SLUG}`;
-    // corsproxy.io is free and requires no key; swap the prefix if it becomes unreliable.
-    const proxied = `https://corsproxy.io/?${encodeURIComponent(campaignUrl)}`;
+  // Multiple proxies are raced in parallel; whichever responds first wins.
+  const CORS_PROXIES = [
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  ];
 
-    const response = await fetch(proxied);
-    if (!response.ok) throw new Error(`Proxy returned HTTP ${response.status}`);
+  async function fetchViaProxy(proxyUrl: string): Promise<number> {
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const html = await response.text();
 
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const el = doc.getElementById('total-raised');
-    if (!el) throw new Error('Donorbox: #total-raised element not found — check the campaign slug');
+    if (!el) throw new Error('#total-raised not found — check the campaign slug');
 
     // Strip the € symbol and comma thousands separators, then parse.
     const amount = parseFloat((el.textContent ?? '').replace(/[€,\s]/g, ''));
-    if (isNaN(amount)) throw new Error(`Donorbox: could not parse amount from "${el.textContent}"`);
+    if (isNaN(amount)) throw new Error(`could not parse amount from "${el.textContent}"`);
     return amount;
+  }
+
+  async function fetchRaisedAmount(): Promise<number> {
+    const campaignUrl = `https://donorbox.org/${DONORBOX_CAMPAIGN_SLUG}`;
+    return Promise.any(CORS_PROXIES.map(make => fetchViaProxy(make(campaignUrl))));
   }
 
   async function readFunds(): Promise<void> {
