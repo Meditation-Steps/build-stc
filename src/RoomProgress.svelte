@@ -39,7 +39,7 @@
   }
 
   .bar-track {
-    height: 6px;
+    height: 10px;
     background: #e0e0e0;
     border-radius: 3px;
     overflow: hidden;

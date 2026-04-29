@@ -15,6 +15,13 @@ const LABEL_RADIUS    = 4;           // px corner radius of text box
 
 const FUNDED_LABEL    = '✅';         // shown on fully funded rooms
 const UNFUNDED_LABEL  = '🚧';        // shown on not-yet-funded rooms
+const ACTIVE_LABEL    = '🏗️';        // shown on the room currently being funded
+
+const FENCE_THICKNESS   = 10;        // px, border ring width at native resolution
+const FENCE_STRIPE_WIDTH = 22;       // px per stripe
+const FENCE_SPEED       = 40;        // px/s, marching speed
+const FENCE_COLOR_A     = 'rgba(255, 200, 0, 0.92)';  // yellow stripe
+const FENCE_COLOR_B     = 'rgba(20,  20,  20, 0.85)'; // dark stripe
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface RgbColor {
@@ -25,7 +32,14 @@ interface RgbColor {
 
 interface MaskData {
   readonly alphaMask: OffscreenCanvas;
+  readonly borderMask: OffscreenCanvas;
   readonly anchor: { readonly x: number; readonly y: number };
+}
+
+export interface ActiveRoomOverlay {
+  readonly borderMask: OffscreenCanvas;
+  readonly w: number;
+  readonly h: number;
 }
 
 const imageCache    = new Map<string, HTMLImageElement>();
@@ -44,6 +58,20 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 // Fraction of the bounding box sampled near each corner when choosing the label anchor.
 const CORNER_SAMPLE_FRACTION = 0.35;
+
+// Approximates morphological dilation by drawing the mask shifted in 16 directions.
+function buildBorderMask(alphaMask: OffscreenCanvas, w: number, h: number): OffscreenCanvas {
+  const border = new OffscreenCanvas(w, h);
+  const ctx = border.getContext('2d') as OffscreenCanvasRenderingContext2D;
+  const r = FENCE_THICKNESS;
+  for (let i = 0; i < 16; i++) {
+    const angle = (i * Math.PI * 2) / 16;
+    ctx.drawImage(alphaMask, Math.round(Math.cos(angle) * r), Math.round(Math.sin(angle) * r));
+  }
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.drawImage(alphaMask, 0, 0);
+  return border;
+}
 
 // Converts white-on-black mask → alpha mask, computes bounding box, then picks the
 // bounding-box corner with the most in-room pixels as the label anchor.
@@ -108,7 +136,8 @@ function buildMaskData(maskImg: HTMLImageElement, w: number, h: number, key: str
     anchor = { x: bestX, y: bestY };
   }
 
-  const result: MaskData = { alphaMask: canvas, anchor };
+  const borderMask = buildBorderMask(canvas, w, h);
+  const result: MaskData = { alphaMask: canvas, borderMask, anchor };
   maskDataCache.set(key, result);
   return result;
 }
@@ -163,10 +192,44 @@ function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, text: 
   ctx.restore();
 }
 
-export async function renderFloor(
+// Draws one frame of the animated construction fence onto the anim canvas.
+// The fence is diagonal stripes clipped to the border ring of the active room.
+export function renderFenceFrame(
   canvas: HTMLCanvasElement,
-  floor: FloorState,
-): Promise<{ x: number; y: number } | null> {
+  overlay: ActiveRoomOverlay,
+  t: number,   // seconds
+): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const { borderMask, w, h } = overlay;
+  ctx.clearRect(0, 0, w, h);
+
+  const sw = FENCE_STRIPE_WIDTH;
+  const period = sw * 2;
+  const offset = (t * FENCE_SPEED) % period;
+
+  ctx.fillStyle = FENCE_COLOR_B;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = FENCE_COLOR_A;
+  for (let x = -(h + period); x < w + h + period; x += period) {
+    const x0 = x + offset;
+    ctx.beginPath();
+    ctx.moveTo(x0,          0);
+    ctx.lineTo(x0 + sw,     0);
+    ctx.lineTo(x0 + sw - h, h);
+    ctx.lineTo(x0 - h,      h);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(borderMask, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+export async function renderFloor(canvas: HTMLCanvasElement, floor: FloorState): Promise<ActiveRoomOverlay | null> {
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
@@ -183,7 +246,7 @@ export async function renderFloor(
   canvas.height = h;
   ctx.drawImage(floorImg, 0, 0);
 
-  let activeAnchor: { x: number; y: number } | null = null;
+  let activeRoomOverlay: ActiveRoomOverlay | null = null;
 
   for (let i = 0; i < floor.rooms.length; i++) {
     const maskImg = maskResults[i];
@@ -191,23 +254,26 @@ export async function renderFloor(
 
     const room = floor.rooms[i];
     const key = maskPath(floor.id, room.id);
-    const { alphaMask, anchor } = buildMaskData(maskImg, w, h, key);
+    const { alphaMask, borderMask, anchor } = buildMaskData(maskImg, w, h, key);
 
-    const [color, label] = ((): [RgbColor, string | null] => {
+    const [color, label] = ((): [RgbColor, string] => {
       switch (room.status.kind) {
         case 'funded':
           return [FUNDED_COLOR, FUNDED_LABEL];
         case 'active':
-          activeAnchor = { x: anchor.x, y: anchor.y };
-          return [lerpColor(UNFUNDED_COLOR, FUNDED_COLOR, room.status.progress), null];
+          return [lerpColor(UNFUNDED_COLOR, FUNDED_COLOR, room.status.progress), ACTIVE_LABEL];
         case 'unfunded':
           return [UNFUNDED_COLOR, UNFUNDED_LABEL];
       }
     })();
 
     applyOverlay(ctx, alphaMask, color, w, h);
-    if (label !== null) drawLabel(ctx, anchor.x, anchor.y, label);
+    drawLabel(ctx, anchor.x, anchor.y, label);
+
+    if (room.status.kind === 'active') {
+      activeRoomOverlay = { borderMask, w, h };
+    }
   }
 
-  return activeAnchor;
+  return activeRoomOverlay;
 }
