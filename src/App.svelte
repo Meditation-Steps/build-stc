@@ -8,10 +8,6 @@
   import GlobalProgress from './GlobalProgress.svelte';
   import RoomProgress from './RoomProgress.svelte';
 
-  // ─── Donorbox integration ─────────────────────────────────────────────────────
-  const DONORBOX_CAMPAIGN_SLUG = 'construct-stc-maharlika'; // ← edit this
-  // ─────────────────────────────────────────────────────────────────────────────
-
   const config = rawConfig as Config;
 
   let totalRaised = $state(0);
@@ -35,33 +31,13 @@
     userChoseFloor = true;
   }
 
-  // Scrapes the public Donorbox campaign page via a CORS proxy.
-  // The raised total is in <p id="total-raised"> formatted as "€1,234,567".
-  // If this ever breaks, inspect the campaign page source and update the selector/parser below.
-  // Multiple proxies are raced in parallel; whichever responds first wins.
-  const CORS_PROXIES = [
-    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  ];
-
-  async function fetchViaProxy(proxyUrl: string): Promise<number> {
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const html = await response.text();
-
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const el = doc.getElementById('total-raised');
-    if (!el) throw new Error('#total-raised not found — check the campaign slug');
-
-    // Strip the € symbol and comma thousands separators, then parse.
-    const amount = parseFloat((el.textContent ?? '').replace(/[€,\s]/g, ''));
-    if (isNaN(amount)) throw new Error(`could not parse amount from "${el.textContent}"`);
-    return amount;
-  }
+  const WORKER_URL = 'https://donorbox-proxy.funbotan.workers.dev/';
 
   async function fetchRaisedAmount(): Promise<number> {
-    const campaignUrl = `https://donorbox.org/${DONORBOX_CAMPAIGN_SLUG}`;
-    return Promise.any(CORS_PROXIES.map(make => fetchViaProxy(make(campaignUrl))));
+    const response = await fetch(WORKER_URL);
+    if (!response.ok) throw new Error(`Worker returned HTTP ${response.status}`);
+    const { raised } = await response.json();
+    return raised;
   }
 
   async function readFunds(): Promise<void> {
