@@ -8,7 +8,7 @@
   let { room }: Props = $props();
 
   const progress = $derived(room.status.kind === 'active' ? room.status.progress : 0);
-  const raised = $derived(Math.round(room.price * progress));
+  const raised = $derived(room.price * progress);
 
   function formatEuros(amount: number): string {
     return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(amount);
